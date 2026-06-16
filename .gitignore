@@ -1,8 +1,23 @@
-# Secrets
+# === Secrets & credentials (PUBLIC REPO — keep this airtight) ===
+# NOTE: gitignore does NOT support trailing comments on pattern lines.
 .env
+.env.*
+!.env.example
+# real user_ids + upload tokens
+config/users.yaml
+# GCP service-account keys
+*-key.json
+application_default_credentials.json
+*.pem
+*.token
 
-# Pulled data (raw + flattened)
+# === Personal / health data (must never be committed) ===
+# pulled Garmin/CGM data + graphs
 data/
+# local meal photos
+meals/
+*.csv
+*.parquet
 
 # Python
 __pycache__/

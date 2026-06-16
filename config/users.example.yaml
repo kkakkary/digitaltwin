@@ -1,0 +1,20 @@
+# The 3 people in the digital twin. Copy to users.yaml and fill in.
+# user_id must be short, lowercase, no spaces — it keys every BigQuery row,
+# every GCS prefix, and every Secret Manager entry.
+#
+# upload_token: a random secret each person's Apple Shortcut sends so the
+#   upload Function knows who they are. Generate with: openssl rand -hex 16
+#   (stored in Secret Manager as upload-token-<user_id>, never in git).
+
+users:
+  - user_id: person1          # e.g. kevin
+    display_name: "Person One"
+    upload_token: ""          # set, then push to Secret Manager via setup.sh
+
+  - user_id: person2
+    display_name: "Person Two"
+    upload_token: ""
+
+  - user_id: person3
+    display_name: "Person Three"
+    upload_token: ""

@@ -1,64 +1,86 @@
-# Garmin Vivoactive 6 — Longitudinal Data Pull
+# DigitalTwin — multi-user metabolic digital twin
 
-Pulls your Garmin Connect health data to local files. **Proof of concept**: confirm
-data can be pulled. Raw JSON output is kept lossless so a later load into a BigQuery
-table on GCP is straightforward.
+Predicts each person's post-meal health response (glucose excursion, etc.) from
+**meal macros** (Gemini Vision on a photo) + **CGM glucose** + **Garmin** context.
+Built for **3 people**, fully attributed and siloed per user.
 
-## What it pulls
+GCP project: `digitaltwin-499202` · region: `us-central1`
 
-Last **7 days** (configurable) of:
+## Architecture
 
-- **Daily wellness** — user summary (steps, resting HR, calories, intensity minutes,
-  floors), heart rates, stress, body battery, steps, intensity minutes, floors
-- **Sleep** — stages, duration, sleep score
-- **HRV / recovery** — HRV status, training readiness, SpO2, respiration
-
-Output lands in `data/`:
-
-- `data/json/<metric>/<YYYY-MM-DD>.json` — raw, lossless API responses
-- `data/csv/<metric>.csv` — flattened, one row per day (summary fields)
-
-## Setup
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-cp .env.example .env
-# edit .env and set GARMIN_EMAIL and GARMIN_PASSWORD
+```
+ iPhone meal photo ─(Apple Shortcut + user token)─►  Cloud Function: upload_meal
+                                                          │ writes
+                                                          ▼
+                       GCS  gs://digitaltwin-499202-meals/<user_id>/inbox/*.jpg
+                                                          │ object-finalize event
+                                                          ▼
+                                          Cloud Function: process_meal
+                                          ├─ Vertex AI Gemini → macros JSON
+                                          └─ write row → BigQuery health_twin.meals
+ Garmin puller ─► garmin_daily ┐
+ CGM poller    ─► glucose      ┼─► BigQuery (per-user, partitioned + clustered)
+                               ┘        │ feature builder windows CGM per meal
+                                        ▼
+                            per-user model (XGBoost) → predictions
 ```
 
-## Run
+**Multi-user model:** one project, one bucket, one dataset. Every row carries a
+`user_id`; tables are date-partitioned and **clustered by `user_id`** so each
+person's queries stay fast and cheap. Per-user credentials live in Secret
+Manager (`upload-token-<user>`, `garmin-creds-<user>`, `cgm-creds-<user>`).
+
+## Status / prerequisites (do these first)
+
+Nothing cloud-side can be created until **both** are done:
+
+1. **Enable billing** on `digitaltwin-499202`
+   → https://console.cloud.google.com/billing (BigQuery + GCS + Functions all
+   require it; this project's data volume stays within the free tiers).
+2. **Refresh Application Default Credentials**:
+   ```
+   gcloud auth application-default login
+   gcloud auth application-default set-quota-project digitaltwin-499202
+   ```
+
+## Provision the foundation
+
+After the prerequisites:
 
 ```bash
-python garmin_pull.py
+cp config/users.example.yaml config/users.yaml   # fill in the 3 real user_ids
+# edit the USERS=(...) array in infra/setup.sh to match
+./infra/setup.sh
 ```
 
-- On the **first run** you may be prompted for a 2FA code (if your account has it on).
-  The auth token is then cached at `~/.garminconnect`, so later runs need no input.
-- If Garmin returns **429 (too many requests)**, wait a few minutes and retry — the
-  login endpoint is rate-limited.
+This enables APIs and creates the bucket, the `health_twin` dataset + tables
+(`meals`, `glucose`, `garmin_daily`), the pipeline service account, and per-user
+secret placeholders. It refuses to run if billing isn't enabled.
 
-## Configuration (optional, via `.env`)
+## Repo layout
 
-| Variable            | Default          | Meaning                          |
-| ------------------- | ---------------- | -------------------------------- |
-| `GARMIN_EMAIL`      | —                | Garmin Connect account email     |
-| `GARMIN_PASSWORD`   | —                | Garmin Connect account password  |
-| `DAYS_BACK`         | `7`              | How many days back to pull       |
-| `GARMIN_TOKENSTORE` | `~/.garminconnect` | Where the auth token is cached |
+```
+infra/              Infra-as-code: setup.sh + BigQuery table schemas
+config/             users.example.yaml (3-person config)
+ingestion/
+  garmin/           Garmin Connect puller + grapher (proof of concept)
+  cgm/              (pending) Libre/Dexcom poller
+functions/          (pending) upload_meal + process_meal Cloud Functions
+```
 
-## Notes
+## What's built vs. pending
 
-- `.env` and `data/` are gitignored — credentials and personal data never get committed.
-- Uses the community [`garminconnect`](https://github.com/cyberjunky/python-garminconnect)
-  library (same mobile SSO login as the official app). Garmin has no official public API.
-- Each metric call is isolated: one unsupported/empty endpoint won't abort the whole run.
+- ✅ Infra-as-code (`infra/setup.sh`), BigQuery schemas, user config, this doc
+- ✅ Garmin puller + grapher (`ingestion/garmin/`) — pulls to local JSON/CSV today;
+  not yet wired to write into BigQuery per user
+- ⏳ Cloud Functions (`upload_meal`, `process_meal`) — next phase, once billing is
+  on so they can be deployed and tested
+- ⏳ CGM poller (`ingestion/cgm/`) once a sensor is chosen
+- ⏳ Feature builder (window CGM per meal) + per-user model training
 
-## Next steps (future phases)
+## Privacy notes
 
-- Load the JSON into a BigQuery table (schema per metric).
-- Run on a schedule in GCP (Cloud Run / Cloud Functions) with credentials in
-  Secret Manager.
-- Backfill full history and add activities/workouts to the metric registry.
+Health data for 3 people. Bucket is private with public-access-prevention;
+`process_meal` uses **Vertex AI Gemini** (inputs are *not* used to train Google's
+models, unlike the free AI Studio tier). Secrets never live in git
+(`config/users.yaml` and `.env` are gitignored).

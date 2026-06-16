@@ -1,0 +1,17 @@
+[
+  {"name": "user_id",          "type": "STRING",    "mode": "REQUIRED", "description": "Which person this meal belongs to"},
+  {"name": "meal_id",          "type": "STRING",    "mode": "REQUIRED", "description": "Unique meal id (user_id + capture timestamp)"},
+  {"name": "capture_ts",       "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When the photo was taken = meal start time (drives CGM windowing)"},
+  {"name": "upload_ts",        "type": "TIMESTAMP", "mode": "NULLABLE", "description": "When the photo reached the cloud (may lag capture_ts)"},
+  {"name": "gcs_uri",          "type": "STRING",    "mode": "NULLABLE", "description": "gs:// path to the archived photo"},
+  {"name": "carbs_g",          "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "protein_g",        "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "fat_g",            "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "fiber_g",          "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "calories",         "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "items",            "type": "JSON",      "mode": "NULLABLE", "description": "Per-food breakdown from Gemini Vision"},
+  {"name": "gemini_confidence","type": "FLOAT",     "mode": "NULLABLE", "description": "Model's self-reported confidence 0-1"},
+  {"name": "gemini_model",     "type": "STRING",    "mode": "NULLABLE", "description": "Model id used (for reproducibility / re-processing)"},
+  {"name": "user_corrected",   "type": "BOOL",      "mode": "NULLABLE", "description": "True if the person edited the macro estimate (gold label)"},
+  {"name": "notes",            "type": "STRING",    "mode": "NULLABLE"}
+]

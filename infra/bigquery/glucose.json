@@ -1,0 +1,9 @@
+[
+  {"name": "user_id",        "type": "STRING",    "mode": "REQUIRED", "description": "Which person this reading belongs to"},
+  {"name": "ts",             "type": "TIMESTAMP", "mode": "REQUIRED", "description": "Reading timestamp"},
+  {"name": "glucose_mg_dl",  "type": "FLOAT",     "mode": "REQUIRED", "description": "Estimated glucose value (mg/dL)"},
+  {"name": "trend",          "type": "STRING",    "mode": "NULLABLE", "description": "Trend arrow / direction if provided"},
+  {"name": "source",         "type": "STRING",    "mode": "NULLABLE", "description": "libre | dexcom | manual"},
+  {"name": "sensor_id",      "type": "STRING",    "mode": "NULLABLE", "description": "Sensor serial/session, to flag warmup + change discontinuities"},
+  {"name": "ingested_ts",    "type": "TIMESTAMP", "mode": "NULLABLE", "description": "When the pipeline stored this row"}
+]
