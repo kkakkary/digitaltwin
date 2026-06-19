@@ -104,15 +104,20 @@ def meal_upload(request):
     except ValueError:
         return (f"capture_ts not valid ISO-8601: {capture_ts!r}", 400)
 
+    notes = (request.form.get("notes") or "").strip()
     img_bytes = _resize_jpeg(file.read())
 
     # --- Gemini Vision first: is this even a meal? ---
+    contents = [types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), PROMPT]
+    if notes:
+        contents.append(
+            f'The person describes this meal as: "{notes}". Trust this description '
+            "to identify foods, brands, and preparation, and to refine portion sizes "
+            "and macros — especially where the photo alone is ambiguous."
+        )
     resp = _genai.models.generate_content(
         model=GEMINI_MODEL,
-        contents=[
-            types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-            PROMPT,
-        ],
+        contents=contents,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=MealEstimate,
@@ -154,6 +159,8 @@ def meal_upload(request):
         "gemini_model": GEMINI_MODEL,
         "user_corrected": False,
         "notes": est.notes,
+        "user_notes": notes or None,
+        "source": "photo",
     }
     errors = _bq.insert_rows_json(f"{PROJECT}.{BQ_DATASET}.{BQ_TABLE}", [row])
     if errors:

@@ -1,0 +1,14 @@
+[
+  {"name": "user_id",       "type": "STRING",    "mode": "REQUIRED", "description": "Which person saved this meal"},
+  {"name": "saved_meal_id", "type": "STRING",    "mode": "REQUIRED", "description": "Unique id for the saved meal template"},
+  {"name": "name",          "type": "STRING",    "mode": "REQUIRED", "description": "User-given name, e.g. 'morning protein shake'"},
+  {"name": "carbs_g",       "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "protein_g",     "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "fat_g",         "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "fiber_g",       "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "calories",      "type": "FLOAT",     "mode": "NULLABLE"},
+  {"name": "items",         "type": "JSON",      "mode": "NULLABLE", "description": "Per-food breakdown carried over from the original estimate"},
+  {"name": "gcs_uri",       "type": "STRING",    "mode": "NULLABLE", "description": "Reference photo from when it was first logged (optional)"},
+  {"name": "user_notes",    "type": "STRING",    "mode": "NULLABLE", "description": "Description carried over from the original meal"},
+  {"name": "created_ts",    "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When the template was saved"}
+]

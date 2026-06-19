@@ -97,7 +97,7 @@ echo "==> Service account ${SA_EMAIL}..."
 gcloud iam service-accounts describe "${SA_EMAIL}" >/dev/null 2>&1 || \
   gcloud iam service-accounts create "${SA_NAME}" --display-name="DigitalTwin pipeline"
 
-for role in roles/bigquery.dataEditor roles/storage.objectAdmin \
+for role in roles/bigquery.dataEditor roles/bigquery.jobUser roles/storage.objectAdmin \
             roles/aiplatform.user roles/secretmanager.secretAccessor; do
   gcloud projects add-iam-policy-binding "${PROJECT}" \
     --member="serviceAccount:${SA_EMAIL}" --role="${role}" \

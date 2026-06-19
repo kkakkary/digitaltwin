@@ -1,9 +1,12 @@
 """meal-web: a phone-friendly web page for logging meals.
 
 Each person opens an unguessable personal link (/m/<link_token>). The link
-token maps to their user_id (server-side, from the MEAL_WEB_LINKS secret), so
-nothing secret is ever exposed in the browser. Submitting a photo forwards it
-to the meal-upload function with the real upload token attached server-side.
+token maps to their user_id (server-side, from MEAL_WEB_LINKS), so nothing
+secret reaches the browser. Features:
+
+  * snap a photo (+ optional text description) -> forwarded to meal-upload
+  * ⭐ save a logged meal as a reusable template (saved_meals table)
+  * re-log a saved meal in one tap (no photo / no Gemini, fresh timestamp)
 
 Deployed as a Cloud Run service (buildpacks: see Procfile).
 """
@@ -13,16 +16,40 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import uuid
 
 import requests
 from flask import Flask, Response, abort, request
+from google.cloud import bigquery
 
 app = Flask(__name__)
 
+PROJECT = os.environ["PROJECT"]
+BQ_DATASET = os.environ.get("BQ_DATASET", "health_twin")
 MEAL_UPLOAD_URL = os.environ["MEAL_UPLOAD_URL"]
 UPLOAD_TOKEN = os.environ["UPLOAD_TOKEN"]
-# {"<link_token>": "<user_id>"} — injected from Secret Manager.
 LINKS: dict[str, str] = json.loads(os.environ.get("MEAL_WEB_LINKS", "{}"))
+
+_bq = bigquery.Client(project=PROJECT)
+MEALS = f"{PROJECT}.{BQ_DATASET}.meals"
+SAVED = f"{PROJECT}.{BQ_DATASET}.saved_meals"
+
+
+def _user_for(link_token: str) -> str:
+    user = LINKS.get(link_token)
+    if not user:
+        abort(404)
+    return user
+
+
+def fetch_saved(user: str) -> list[dict]:
+    """Return the user's saved-meal templates, newest first."""
+    q = f"""SELECT saved_meal_id, name, calories, carbs_g, protein_g, fat_g, fiber_g
+            FROM `{SAVED}` WHERE user_id=@u ORDER BY created_ts DESC LIMIT 50"""
+    job = _bq.query(q, job_config=bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("u", "STRING", user)]))
+    return [dict(r) for r in job.result()]
+
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -41,22 +68,30 @@ PAGE = """<!doctype html>
          background:#f4f6f5; color:#15211c; -webkit-tap-highlight-color:transparent; }
   .wrap { max-width:520px; margin:0 auto; padding:24px 18px 48px; }
   h1 { font-size:1.4rem; margin:8px 0 2px; }
+  h2 { font-size:1.05rem; margin:30px 0 10px; color:#2a3a33; }
   .who { color:#5a6b63; margin:0 0 22px; font-size:.95rem; }
   label.cam { display:block; background:#0b7; color:#fff; text-align:center;
               padding:22px; border-radius:16px; font-size:1.15rem; font-weight:600;
               cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.12); }
   label.cam:active { transform:scale(.99); }
   input[type=file] { display:none; }
-  #preview { width:100%; margin:18px 0 0; border-radius:14px; display:none; }
-  button#send { width:100%; margin-top:18px; padding:18px; font-size:1.1rem; font-weight:600;
-                border:0; border-radius:14px; background:#15211c; color:#fff; }
-  button#send:disabled { opacity:.4; }
-  #status { margin-top:22px; font-size:1rem; }
-  .card { background:#fff; border-radius:14px; padding:16px 18px; margin-top:14px;
+  textarea { width:100%; margin-top:12px; padding:12px; border:1px solid #cdd6d2;
+             border-radius:12px; font-size:1rem; font-family:inherit; resize:vertical; min-height:52px; }
+  #preview { width:100%; margin:14px 0 0; border-radius:14px; display:none; }
+  button { font-family:inherit; }
+  button.primary { width:100%; margin-top:14px; padding:18px; font-size:1.1rem; font-weight:600;
+                   border:0; border-radius:14px; background:#15211c; color:#fff; }
+  button.primary:disabled { opacity:.4; }
+  button.ghost { border:1px solid #0b7; background:#fff; color:#0b7; padding:10px 14px;
+                 border-radius:10px; font-weight:600; }
+  #status { margin-top:20px; font-size:1rem; }
+  .card { background:#fff; border-radius:14px; padding:16px 18px; margin-top:12px;
           box-shadow:0 1px 4px rgba(0,0,0,.06); }
   .big { font-size:1.5rem; font-weight:700; }
   .muted { color:#5a6b63; font-size:.9rem; }
   .err { color:#b00020; }
+  .saved-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .saved-row .name { font-weight:600; }
   .spinner { display:inline-block; width:18px; height:18px; border:3px solid #ccc;
              border-top-color:#0b7; border-radius:50%; animation:spin .8s linear infinite;
              vertical-align:-3px; margin-right:8px; }
@@ -71,15 +106,24 @@ PAGE = """<!doctype html>
   <label class="cam" for="photo">Take a photo of your meal</label>
   <input id="photo" type="file" accept="image/*" capture="environment">
   <img id="preview" alt="preview">
-  <button id="send" disabled>Send</button>
+  <textarea id="notes" placeholder="Optional: describe it (e.g. '6oz grilled chicken, 1 cup brown rice, olive oil') — makes the estimate more accurate"></textarea>
+  <button id="send" class="primary" disabled>Send</button>
   <div id="status"></div>
+
+  <h2>⭐ Your saved meals</h2>
+  <div id="saved"></div>
 </div>
 
 <script>
+  const SAVED = __SAVED_JSON__;
+  const base = window.location.pathname;             // /m/<token>
   const photo = document.getElementById('photo');
   const preview = document.getElementById('preview');
+  const notes = document.getElementById('notes');
   const send = document.getElementById('send');
   const status = document.getElementById('status');
+  const savedBox = document.getElementById('saved');
+  let lastMeal = null;
 
   photo.addEventListener('change', () => {
     if (!photo.files.length) return;
@@ -95,16 +139,15 @@ PAGE = """<!doctype html>
     status.innerHTML = '<span class="spinner"></span>Analyzing your meal…';
     const fd = new FormData();
     fd.append('image', photo.files[0]);
+    fd.append('notes', notes.value || '');
     fd.append('capture_ts', new Date().toISOString());
     try {
-      const r = await fetch(window.location.pathname + '/submit', { method:'POST', body:fd });
+      const r = await fetch(base + '/submit', { method:'POST', body:fd });
       const d = await r.json();
       if (d.status === 'ok') {
         const m = d.macros;
-        status.innerHTML = `<div class="card"><div class="big">✅ Logged</div>
-          <div style="margin-top:8px">≈ <strong>${Math.round(m.calories)}</strong> kcal</div>
-          <div class="muted">${Math.round(m.carbs_g)}g carbs · ${Math.round(m.protein_g)}g protein · ${Math.round(m.fat_g)}g fat · ${Math.round(m.fiber_g)}g fiber</div>
-          </div>`;
+        lastMeal = { ...m, gcs_uri: d.gcs_uri, user_notes: notes.value || '' };
+        status.innerHTML = macroCard(m, true);
       } else if (d.status === 'skipped') {
         status.innerHTML = `<div class="card"><div class="big">🤔 Not a meal</div>
           <div class="muted">${d.detail || "That didn't look like food, so nothing was logged."}</div></div>`;
@@ -114,22 +157,65 @@ PAGE = """<!doctype html>
     } catch (e) {
       status.innerHTML = `<div class="card err">Network error. Please try again.</div>`;
     }
-    // reset for the next meal
-    photo.value = '';
-    preview.style.display = 'none';
+    photo.value = ''; preview.style.display='none'; notes.value='';
   });
+
+  function macroCard(m, withSave) {
+    return `<div class="card"><div class="big">✅ Logged</div>
+      <div style="margin-top:8px">≈ <strong>${Math.round(m.calories)}</strong> kcal</div>
+      <div class="muted">${Math.round(m.carbs_g)}g carbs · ${Math.round(m.protein_g)}g protein · ${Math.round(m.fat_g)}g fat · ${Math.round(m.fiber_g)}g fiber</div>
+      ${withSave ? '<button class="ghost" style="margin-top:14px" onclick="saveMeal()">⭐ Save this meal</button>' : ''}
+      </div>`;
+  }
+
+  async function saveMeal() {
+    if (!lastMeal) return;
+    const name = prompt("Name this meal (e.g. 'morning protein shake'):");
+    if (!name) return;
+    const r = await fetch(base + '/save', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, ...lastMeal })
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      SAVED.unshift({ saved_meal_id:d.saved_meal_id, name, calories:lastMeal.calories,
+        carbs_g:lastMeal.carbs_g, protein_g:lastMeal.protein_g, fat_g:lastMeal.fat_g, fiber_g:lastMeal.fiber_g });
+      renderSaved();
+      status.innerHTML = `<div class="card"><div class="big">⭐ Saved</div>
+        <div class="muted">"${name}" is now in your saved meals.</div></div>`;
+    }
+  }
+
+  async function logSaved(id, btn) {
+    btn.disabled = true; btn.textContent = 'Logging…';
+    const r = await fetch(base + '/log-saved', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ saved_meal_id:id, capture_ts:new Date().toISOString() })
+    });
+    const d = await r.json();
+    btn.disabled = false; btn.textContent = 'Log again';
+    status.scrollIntoView({behavior:'smooth'});
+    status.innerHTML = (d.status === 'ok')
+      ? `<div class="card"><div class="big">✅ Logged</div><div class="muted">Re-logged "${d.name}" just now.</div></div>`
+      : `<div class="card err">Couldn't log that. Try again.</div>`;
+  }
+
+  function renderSaved() {
+    if (!SAVED.length) { savedBox.innerHTML = '<p class="muted">No saved meals yet — log one, then tap “Save this meal”.</p>'; return; }
+    savedBox.innerHTML = SAVED.map(s => `<div class="card saved-row">
+        <div><div class="name">${s.name}</div>
+          <div class="muted">≈ ${Math.round(s.calories)} kcal · ${Math.round(s.carbs_g)}c / ${Math.round(s.protein_g)}p / ${Math.round(s.fat_g)}f</div></div>
+        <button class="ghost" onclick="logSaved('${s.saved_meal_id}', this)">Log again</button>
+      </div>`).join('');
+  }
+  renderSaved();
 </script>
 </body>
 </html>"""
 
 MANIFEST = {
-    "name": "Log a meal",
-    "short_name": "Log Meal",
-    "display": "standalone",
-    "background_color": "#f4f6f5",
-    "theme_color": "#0b7",
-    "start_url": ".",
-    "icons": [],
+    "name": "Log a meal", "short_name": "Log Meal", "display": "standalone",
+    "background_color": "#f4f6f5", "theme_color": "#0b7", "start_url": ".", "icons": [],
 }
 
 
@@ -145,28 +231,89 @@ def manifest():
 
 @app.get("/m/<link_token>")
 def page(link_token: str):
-    user = LINKS.get(link_token)
-    if not user:
-        abort(404)
-    return Response(PAGE.replace("__USER__", user), mimetype="text/html")
+    user = _user_for(link_token)
+    saved_json = json.dumps(fetch_saved(user), default=str)
+    html = PAGE.replace("__USER__", user).replace("__SAVED_JSON__", saved_json)
+    return Response(html, mimetype="text/html")
 
 
 @app.post("/m/<link_token>/submit")
 def submit(link_token: str):
-    user = LINKS.get(link_token)
-    if not user:
-        abort(404)
+    user = _user_for(link_token)
     file = request.files.get("image")
     if file is None:
         return Response(json.dumps({"status": "error"}), 400, mimetype="application/json")
     capture_ts = request.form.get("capture_ts") or dt.datetime.now(dt.timezone.utc).isoformat()
-
-    # Forward to meal-upload with the real token attached server-side.
     resp = requests.post(
         MEAL_UPLOAD_URL,
-        files={"image": (file.filename or "meal.jpg", file.read(),
-                         file.mimetype or "image/jpeg")},
-        data={"user_id": user, "capture_ts": capture_ts, "token": UPLOAD_TOKEN},
+        files={"image": (file.filename or "meal.jpg", file.read(), file.mimetype or "image/jpeg")},
+        data={"user_id": user, "capture_ts": capture_ts, "token": UPLOAD_TOKEN,
+              "notes": request.form.get("notes", "")},
         timeout=120,
     )
     return Response(resp.text, status=resp.status_code, mimetype="application/json")
+
+
+@app.post("/m/<link_token>/save")
+def save(link_token: str):
+    user = _user_for(link_token)
+    b = request.get_json(force=True, silent=True) or {}
+    name = (b.get("name") or "").strip()
+    if not name:
+        return Response(json.dumps({"status": "error", "reason": "name required"}), 400,
+                        mimetype="application/json")
+    saved_meal_id = f"{user}-{uuid.uuid4().hex[:10]}"
+    row = {
+        "user_id": user, "saved_meal_id": saved_meal_id, "name": name,
+        "carbs_g": b.get("carbs_g"), "protein_g": b.get("protein_g"),
+        "fat_g": b.get("fat_g"), "fiber_g": b.get("fiber_g"), "calories": b.get("calories"),
+        "items": json.dumps(b.get("items")) if b.get("items") is not None else None,
+        "gcs_uri": b.get("gcs_uri"), "user_notes": b.get("user_notes"),
+        "created_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    errors = _bq.insert_rows_json(SAVED, [row])
+    if errors:
+        return Response(json.dumps({"status": "error", "details": errors}), 500,
+                        mimetype="application/json")
+    return Response(json.dumps({"status": "ok", "saved_meal_id": saved_meal_id}),
+                    mimetype="application/json")
+
+
+@app.post("/m/<link_token>/log-saved")
+def log_saved(link_token: str):
+    user = _user_for(link_token)
+    b = request.get_json(force=True, silent=True) or {}
+    sid = b.get("saved_meal_id")
+    if not sid:
+        return Response(json.dumps({"status": "error"}), 400, mimetype="application/json")
+    capture_ts = b.get("capture_ts") or dt.datetime.now(dt.timezone.utc).isoformat()
+
+    # Look up the saved template (must belong to this user).
+    q = f"SELECT * FROM `{SAVED}` WHERE user_id=@u AND saved_meal_id=@s LIMIT 1"
+    job = _bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("u", "STRING", user),
+        bigquery.ScalarQueryParameter("s", "STRING", sid)]))
+    rows = list(job.result())
+    if not rows:
+        return Response(json.dumps({"status": "error", "reason": "not found"}), 404,
+                        mimetype="application/json")
+    s = rows[0]
+    cap_dt = dt.datetime.fromisoformat(capture_ts.replace("Z", "+00:00"))
+    meal = {
+        "user_id": user,
+        "meal_id": f"{user}-{cap_dt.strftime('%Y%m%dT%H%M%S')}",
+        "capture_ts": cap_dt.isoformat(),
+        "upload_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "gcs_uri": s.get("gcs_uri"),
+        "carbs_g": s.get("carbs_g"), "protein_g": s.get("protein_g"),
+        "fat_g": s.get("fat_g"), "fiber_g": s.get("fiber_g"), "calories": s.get("calories"),
+        "items": json.dumps(s.get("items")) if s.get("items") is not None else None,
+        "gemini_confidence": None, "gemini_model": None, "user_corrected": False,
+        "notes": None, "user_notes": s.get("user_notes"), "source": "saved",
+    }
+    errors = _bq.insert_rows_json(MEALS, [meal])
+    if errors:
+        return Response(json.dumps({"status": "error", "details": errors}), 500,
+                        mimetype="application/json")
+    return Response(json.dumps({"status": "ok", "name": s.get("name")}),
+                    mimetype="application/json")

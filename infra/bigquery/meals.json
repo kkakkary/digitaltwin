@@ -4,6 +4,8 @@
   {"name": "capture_ts",       "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When the photo was taken = meal start time (drives CGM windowing)"},
   {"name": "upload_ts",        "type": "TIMESTAMP", "mode": "NULLABLE", "description": "When the photo reached the cloud (may lag capture_ts)"},
   {"name": "gcs_uri",          "type": "STRING",    "mode": "NULLABLE", "description": "gs:// path to the archived photo"},
+  {"name": "user_notes",       "type": "STRING",    "mode": "NULLABLE", "description": "Free-text description the person typed to improve the estimate"},
+  {"name": "source",           "type": "STRING",    "mode": "NULLABLE", "description": "How it was logged: photo | saved"},
   {"name": "carbs_g",          "type": "FLOAT",     "mode": "NULLABLE"},
   {"name": "protein_g",        "type": "FLOAT",     "mode": "NULLABLE"},
   {"name": "fat_g",            "type": "FLOAT",     "mode": "NULLABLE"},
