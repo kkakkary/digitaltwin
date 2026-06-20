@@ -64,19 +64,41 @@ infra/              Infra-as-code: setup.sh + BigQuery table schemas
 config/             users.example.yaml (3-person config)
 ingestion/
   garmin/           Garmin Connect puller + grapher (proof of concept)
+  omron/            Omron Connect reader
   cgm/              (pending) Libre/Dexcom poller
-functions/          (pending) upload_meal + process_meal Cloud Functions
+functions/
+  meal_upload/      photo/description -> Gemini -> BigQuery meals
+  meal_web/         phone web app (notes, saved meals, time picker)
+  garmin_sync/      daily Garmin baseline poll -> BigQuery garmin_daily
 ```
 
 ## What's built vs. pending
 
-- ✅ Infra-as-code (`infra/setup.sh`), BigQuery schemas, user config, this doc
-- ✅ Garmin puller + grapher (`ingestion/garmin/`) — pulls to local JSON/CSV today;
-  not yet wired to write into BigQuery per user
-- ⏳ Cloud Functions (`upload_meal`, `process_meal`) — next phase, once billing is
-  on so they can be deployed and tested
-- ⏳ CGM poller (`ingestion/cgm/`) once a sensor is chosen
+- ✅ Infra-as-code (`infra/setup.sh`), BigQuery schemas, user config
+- ✅ Meal logging: `meal-upload` + `meal-web` (photo and/or description, saved
+  meals, optional meal time) → `meals`
+- ✅ Garmin baseline → BigQuery: `garmin-sync` Cloud Function on a daily Cloud
+  Scheduler job (`garmin-daily`, 08:00 PT) → `garmin_daily`, per user
+- ⏳ CGM poller (`ingestion/cgm/`) once a sensor is chosen → `glucose`
 - ⏳ Feature builder (window CGM per meal) + per-user model training
+
+## Garmin sync — onboarding a user
+
+Garmin login needs a password + MFA (can't run unattended), but the token it
+returns auto-refreshes for ~1 year. So each person logs in **once**, and we
+store that token in Secret Manager; the scheduled job runs without passwords.
+
+1. Locally, log in with their Garmin credentials (`ingestion/garmin/`), which
+   caches a token at `~/.garminconnect`.
+2. Serialize + store it (never printed):
+   ```
+   python -c "from garminconnect import Garmin; g=Garmin(); g.login('~/.garminconnect'); import sys; sys.stdout.write(g.client.dumps())" \
+     | gcloud secrets create garmin-token-<user> --data-file=- --replication-policy=automatic
+   ```
+3. Add `<user>` to the `GARMIN_USERS` env var on the `garmin-sync` function.
+
+Backfill history any time: `GET garmin-sync?days=N` (default window is 2 days).
+Currently connected: **kevin**.
 
 ## Privacy notes
 
