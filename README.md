@@ -88,20 +88,24 @@ functions/
 ## Garmin sync — onboarding a user
 
 Garmin login needs a password + MFA (can't run unattended), but the token it
-returns auto-refreshes for ~1 year. So each person logs in **once**, and we
-store that token in Secret Manager; the scheduled job runs without passwords.
+returns auto-refreshes for ~1 year. So each person logs in **once**; only the
+token is stored (in Secret Manager as `garmin-token-<user>`), never the password.
 
-1. Locally, log in with their Garmin credentials (`ingestion/garmin/`), which
-   caches a token at `~/.garminconnect`.
-2. Serialize + store it (never printed):
-   ```
-   python -c "from garminconnect import Garmin; g=Garmin(); g.login('~/.garminconnect'); import sys; sys.stdout.write(g.client.dumps())" \
-     | gcloud secrets create garmin-token-<user> --data-file=- --replication-policy=automatic
-   ```
-3. Add `<user>` to the `GARMIN_USERS` env var on the `garmin-sync` function.
+**Self-serve (recommended):** each person opens **`/connect/<their-link-token>`**
+on the `meal-web` service — the same personal link they use for meals — enters
+their Garmin login once (handles MFA), and they're done. The sync functions
+**auto-discover** anyone with a `garmin-token-<user>` secret, so no redeploy is
+needed. (A new user's empty token secret must exist first; pre-create with
+`gcloud secrets create garmin-token-<user>`.)
 
-Backfill history any time: `GET garmin-sync?days=N` (default window is 2 days).
-Currently connected: **kevin**.
+**CLI alternative (operator):** run `ingestion/garmin/bootstrap_token.py <user>`.
+
+The pipeline SA holds only `secretVersionAdder` + `viewer` + `accessor` on
+secrets (no admin), so the public web service can write/discover tokens but
+cannot read or delete them.
+
+Backfill history any time: `GET garmin-sync?days=N` (default 2 days).
+Connected: **kevin** (christian/vince: secrets staged, awaiting their login).
 
 ## Privacy notes
 

@@ -13,6 +13,7 @@ Deployed as a Cloud Run service (buildpacks: see Procfile).
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 import os
@@ -20,7 +21,8 @@ import uuid
 
 import requests
 from flask import Flask, Response, abort, request
-from google.cloud import bigquery
+from garminconnect import Garmin
+from google.cloud import bigquery, secretmanager
 
 app = Flask(__name__)
 
@@ -31,8 +33,21 @@ UPLOAD_TOKEN = os.environ["UPLOAD_TOKEN"]
 LINKS: dict[str, str] = json.loads(os.environ.get("MEAL_WEB_LINKS", "{}"))
 
 _bq = bigquery.Client(project=PROJECT)
+_sm = secretmanager.SecretManagerServiceClient()
 MEALS = f"{PROJECT}.{BQ_DATASET}.meals"
 SAVED = f"{PROJECT}.{BQ_DATASET}.saved_meals"
+
+
+def _store_garmin_token(user: str, token: str) -> None:
+    """Save (or update) the user's Garmin token as garmin-token-<user>."""
+    secret_id = f"garmin-token-{user}"
+    parent = f"projects/{PROJECT}/secrets/{secret_id}"
+    try:
+        _sm.get_secret(name=parent)
+    except Exception:
+        _sm.create_secret(parent=f"projects/{PROJECT}", secret_id=secret_id,
+                           secret={"replication": {"automatic": {}}})
+    _sm.add_secret_version(parent=parent, payload={"data": token.encode()})
 
 
 def _user_for(link_token: str) -> str:
@@ -325,3 +340,94 @@ def log_saved(link_token: str):
                         mimetype="application/json")
     return Response(json.dumps({"status": "ok", "name": s.get("name")}),
                     mimetype="application/json")
+
+
+# --------------------------------------------------------------------------- #
+# Connect Garmin — one-time, phone-friendly account link (same personal link).
+# The password is used only for this login and never stored; only the
+# resulting (auto-refreshing) token is saved to garmin-token-<user>.
+# --------------------------------------------------------------------------- #
+def _connect_shell(body: str) -> str:
+    return f"""<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connect Garmin</title>
+<style>
+  body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         background:#f4f6f5; color:#15211c; }}
+  .wrap {{ max-width:520px; margin:0 auto; padding:28px 18px; }}
+  h1 {{ font-size:1.35rem; }}
+  input {{ width:100%; padding:13px; margin-top:10px; border:1px solid #cdd6d2;
+          border-radius:12px; font-size:1rem; }}
+  button {{ width:100%; margin-top:16px; padding:16px; font-size:1.1rem; font-weight:600;
+           border:0; border-radius:14px; background:#0b7; color:#fff; }}
+  .muted {{ color:#5a6b63; font-size:.9rem; }} .err {{ color:#b00020; }}
+  .card {{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 1px 4px rgba(0,0,0,.06); }}
+</style></head><body><div class="wrap">{body}</div></body></html>"""
+
+
+@app.get("/connect/<link_token>")
+def connect_page(link_token: str):
+    user = _user_for(link_token)
+    body = f"""<h1>⌚ Connect Garmin</h1>
+    <p class="muted">Hi <strong>{user}</strong> — sign in once to link your Garmin
+    account. Your password is used only to connect and is never stored.</p>
+    <form method="POST" action="start" class="card">
+      <input name="email" type="email" placeholder="Garmin email" autocomplete="username" required>
+      <input name="password" type="password" placeholder="Garmin password" autocomplete="current-password" required>
+      <button type="submit">Connect</button>
+    </form>"""
+    return Response(_connect_shell(body), mimetype="text/html")
+
+
+@app.post("/connect/<link_token>/start")
+def connect_start(link_token: str):
+    user = _user_for(link_token)
+    email = (request.form.get("email") or "").strip()
+    password = request.form.get("password") or ""
+    if not email or not password:
+        return Response(_connect_shell('<div class="card err">Email and password required.</div>'), 400,
+                        mimetype="text/html")
+    try:
+        g = Garmin(email, password, return_on_mfa=True)
+        r1, r2 = g.login()
+        if r1 == "needs_mfa":
+            # Carry the (serializable) login state to the MFA step via a hidden field.
+            state = base64.b64encode(json.dumps(r2).encode()).decode()
+            body = f"""<h1>⌚ Enter your code</h1>
+            <p class="muted">Garmin sent a verification code to <strong>{user}</strong>'s
+            email/phone. Enter it to finish connecting.</p>
+            <form method="POST" action="mfa" class="card">
+              <input type="hidden" name="state" value="{state}">
+              <input name="code" inputmode="numeric" placeholder="6-digit code" required>
+              <button type="submit">Verify &amp; connect</button>
+            </form>"""
+            return Response(_connect_shell(body), mimetype="text/html")
+        _store_garmin_token(user, g.client.dumps())
+        return Response(_connect_shell(_connect_success(user)), mimetype="text/html")
+    except Exception:
+        return Response(_connect_shell(
+            '<div class="card err">Couldn\'t sign in — check the email/password and try '
+            'again.</div>'), 400, mimetype="text/html")
+
+
+@app.post("/connect/<link_token>/mfa")
+def connect_mfa(link_token: str):
+    user = _user_for(link_token)
+    code = (request.form.get("code") or "").strip()
+    try:
+        state = json.loads(base64.b64decode(request.form.get("state", "")))
+        g = Garmin(return_on_mfa=True)
+        g.resume_login(state, code)
+        _store_garmin_token(user, g.client.dumps())
+        return Response(_connect_shell(_connect_success(user)), mimetype="text/html")
+    except Exception:
+        return Response(_connect_shell(
+            '<div class="card err">That code didn\'t work. Go back and try connecting '
+            'again.</div>'), 400, mimetype="text/html")
+
+
+def _connect_success(user: str) -> str:
+    return f"""<div class="card"><h1>✅ Garmin connected</h1>
+    <p class="muted">Thanks {user} — your Garmin data will start syncing automatically.
+    You can close this page.</p></div>"""

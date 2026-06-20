@@ -22,7 +22,6 @@ from google.cloud import bigquery, secretmanager
 
 PROJECT = os.environ["PROJECT"]
 DATASET = os.environ.get("BQ_DATASET", "health_twin")
-USERS = [u.strip() for u in os.environ.get("GARMIN_USERS", "").split(",") if u.strip()]
 DAYS_BACK = int(os.environ.get("DAYS_BACK", "2"))
 TABLE = f"{PROJECT}.{DATASET}.garmin_intraday"
 
@@ -33,6 +32,21 @@ _sm = secretmanager.SecretManagerServiceClient()
 def _token(user: str) -> str:
     name = f"projects/{PROJECT}/secrets/garmin-token-{user}/versions/latest"
     return _sm.access_secret_version(name=name).payload.data.decode()
+
+
+def _users() -> list[str]:
+    """Users with a connected Garmin account = secrets named garmin-token-<user>.
+    Auto-discovered so the Connect Garmin page onboards people with no redeploy.
+    GARMIN_USERS env (comma-separated) overrides if set."""
+    env = [u.strip() for u in os.environ.get("GARMIN_USERS", "").split(",") if u.strip()]
+    if env:
+        return env
+    out = []
+    for s in _sm.list_secrets(parent=f"projects/{PROJECT}"):
+        short = s.name.split("/")[-1]
+        if short.startswith("garmin-token-"):
+            out.append(short[len("garmin-token-"):])
+    return out
 
 
 def _safe(fn):
@@ -103,7 +117,7 @@ def garmin_intraday_sync(request):
     days = int(request.args.get("days", DAYS_BACK))
     dates = [(dt.date.today() - dt.timedelta(days=i)).isoformat() for i in range(days)]
     out: dict[str, object] = {}
-    for user in USERS:
+    for user in _users():
         try:
             g = Garmin()
             g.login(_token(user))
