@@ -114,6 +114,7 @@ def _fetch_bp(client: httpx.Client, tokens: dict, since_ms: int) -> list[dict]:
         r.raise_for_status()
         resp = r.json()
         page: list[dict] = resp.get("data") or []
+        print(f"[fetch-bp] since_ms={since_ms} page={len(page)} resp_keys={list(resp.keys())}")
         if not page:
             break
         readings.extend(page)
@@ -177,7 +178,7 @@ def _upsert(user: str, rows: list[dict]) -> None:
 def omron_sync(request):
     days = int(request.args.get("days", DAYS_BACK))
     since_date = dt.date.today() - dt.timedelta(days=days)
-    since_ms = int(
+    since_ms = 0 if request.args.get("all") else int(
         dt.datetime(since_date.year, since_date.month, since_date.day,
                     tzinfo=dt.timezone.utc).timestamp() * 1000
     )
