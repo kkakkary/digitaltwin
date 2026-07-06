@@ -23,6 +23,7 @@ PROVIDER="github-provider"
 echo "==> Enabling required APIs"
 gcloud services enable \
   iamcredentials.googleapis.com \
+  cloudresourcemanager.googleapis.com \
   cloudfunctions.googleapis.com \
   run.googleapis.com \
   cloudbuild.googleapis.com \
