@@ -1,0 +1,7 @@
+# Analysis-notebook dependencies (separate from the Cloud Functions).
+# Install into a venv:  pip install -r notebooks/requirements.txt
+google-cloud-bigquery>=3.25.0
+db-dtypes>=1.2.0          # lets BigQuery -> pandas convert DATE/TIMESTAMP cleanly
+pandas>=2.0.0
+matplotlib>=3.8.0
+jupyter>=1.0.0
