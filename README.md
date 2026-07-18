@@ -1,4 +1,5 @@
-# DigitalTwin — multi-user metabolic digital twin
+# Biostream - Data Ingestion Pipeline
+
 
 Predicts each person's post-meal health response (glucose excursion, etc.) from
 **meal macros** (Gemini Vision on a photo) + **CGM glucose** + **Garmin** context.
