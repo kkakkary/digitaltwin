@@ -47,6 +47,7 @@ def test_sleep_stages_drops_missing_and_clamps_negative_light():
 def test_time_in_range():
     assert transforms.time_in_range(_glucose([65, 100, 150, 200])) == 50.0
     assert transforms.time_in_range(_glucose([])) is None
+    assert transforms.time_in_range(_glucose([70,180])) == 100.0
 
 
 def test_break_time_gaps_inserts_nan_row_inside_gap():
