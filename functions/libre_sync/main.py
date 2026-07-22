@@ -136,7 +136,15 @@ _TREND_MAP = {
 def _parse(m: dict, user_id: str, sensor_id: str, ingested_ts: str) -> dict | None:
     if not m:
         return None
-    ts_raw = m.get("Timestamp") or m.get("FactoryTimestamp")
+    # "Timestamp" is already local to the collector device's timezone (confirmed
+    # against "FactoryTimestamp", which is the true-UTC equivalent, 7h ahead in
+    # PDT) — use it as-is, no conversion. Only fall back to FactoryTimestamp
+    # (true UTC, needs the fixed PDT shift) if Timestamp is missing.
+    local = True
+    ts_raw = m.get("Timestamp")
+    if not ts_raw:
+        ts_raw = m.get("FactoryTimestamp")
+        local = False
     if not ts_raw:
         return None
 
@@ -144,7 +152,8 @@ def _parse(m: dict, user_id: str, sensor_id: str, ingested_ts: str) -> dict | No
         ts = dt.datetime.strptime(ts_raw, "%m/%d/%Y %I:%M:%S %p")
     except ValueError:
         ts = dt.datetime.fromisoformat(ts_raw)
-    ts = ts.replace(tzinfo=dt.timezone.utc)
+    if not local:
+        ts = ts - dt.timedelta(hours=7)
 
     glucose_mg_dl = float(m.get("ValueInMgPerDl") or m.get("Value") or 0)
     if glucose_mg_dl == 0:
@@ -176,7 +185,7 @@ def _upsert(user_id: str, rows: list[dict]) -> None:
         f"DELETE FROM `{TABLE}` WHERE user_id=@u AND ts IN UNNEST(@t)",
         job_config=bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", user_id),
-            bigquery.ArrayQueryParameter("t", "TIMESTAMP", timestamps),
+            bigquery.ArrayQueryParameter("t", "DATETIME", timestamps),
         ]),
     ).result()
     _bq.load_table_from_json(
@@ -190,7 +199,8 @@ def _upsert(user_id: str, rows: list[dict]) -> None:
 # --------------------------------------------------------------------------- #
 @functions_framework.http
 def libre_sync(request):
-    ingested_ts = dt.datetime.now(dt.timezone.utc).isoformat()
+    # Pipeline bookkeeping timestamp (not a vendor reading) — fixed PDT (UTC-7).
+    ingested_ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=7)).replace(tzinfo=None).isoformat()
     out: dict[str, object] = {}
 
     try:

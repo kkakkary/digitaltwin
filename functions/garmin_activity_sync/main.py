@@ -47,20 +47,20 @@ def _int(x):
     return int(round(x)) if isinstance(x, (int, float)) else None
 
 
-def _ts(gmt: str | None) -> str | None:
-    """Parse Garmin's 'startTimeGMT' ('2026-07-19 01:30:00') into ISO UTC."""
-    if not gmt:
+def _ts(local: str | None) -> str | None:
+    """Parse Garmin's 'startTimeLocal' ('2026-07-19 01:30:00', already local
+    to the device's timezone) into a naive timestamp string."""
+    if not local:
         return None
     try:
-        return (dt.datetime.strptime(gmt[:19], "%Y-%m-%d %H:%M:%S")
-                .replace(tzinfo=dt.timezone.utc).isoformat())
+        return dt.datetime.strptime(local[:19], "%Y-%m-%d %H:%M:%S").isoformat()
     except Exception:
         return None
 
 
 def _row(user: str, a: dict) -> dict | None:
     activity_id = a.get("activityId")
-    start = _ts(a.get("startTimeGMT"))
+    start = _ts(a.get("startTimeLocal"))
     if activity_id is None or start is None:
         return None
     duration = _int(a.get("duration"))

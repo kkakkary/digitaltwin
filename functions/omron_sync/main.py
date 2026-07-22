@@ -135,11 +135,15 @@ def _to_dt(ts_raw: int) -> dt.datetime:
 
 def _parse(user: str, m: dict, ingested_ts: str) -> dict:
     utc_dt = _to_dt(int(m["measurementDate"]))
+    # Omron reports the device's own UTC offset per reading — use that (not a
+    # hardcoded shift) so this stays correct if a reading was taken elsewhere.
+    tz_offset_minutes = int(m["timeZone"]) // 60
+    local_dt = (utc_dt + dt.timedelta(minutes=tz_offset_minutes)).replace(tzinfo=None)
     return {
         "user_id": user,
-        "measurement_date": utc_dt.date().isoformat(),
-        "measurement_ts_utc": utc_dt.isoformat(),
-        "tz_offset_minutes": int(m["timeZone"]) // 60,
+        "measurement_date": local_dt.date().isoformat(),
+        "measurement_ts_utc": local_dt.isoformat(),
+        "tz_offset_minutes": tz_offset_minutes,
         "systolic": int(m["systolic"]),
         "diastolic": int(m["diastolic"]),
         "pulse": int(m["pulse"]),
@@ -182,7 +186,8 @@ def omron_sync(request):
         dt.datetime(since_date.year, since_date.month, since_date.day,
                     tzinfo=dt.timezone.utc).timestamp() * 1000
     )
-    ingested_ts = dt.datetime.now(dt.timezone.utc).isoformat()
+    # Pipeline bookkeeping timestamp (not a device reading) — fixed PDT (UTC-7).
+    ingested_ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=7)).replace(tzinfo=None).isoformat()
     out: dict[str, object] = {}
 
     for user in _users():

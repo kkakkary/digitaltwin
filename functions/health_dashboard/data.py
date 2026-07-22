@@ -49,8 +49,8 @@ def _user_param():
 
 def _window_params(start_ts, end_ts):
     return [_user_param(),
-            bigquery.ScalarQueryParameter("start_ts", "TIMESTAMP", start_ts),
-            bigquery.ScalarQueryParameter("end_ts", "TIMESTAMP", end_ts)]
+            bigquery.ScalarQueryParameter("start_ts", "DATETIME", start_ts),
+            bigquery.ScalarQueryParameter("end_ts", "DATETIME", end_ts)]
 
 
 @st.cache_data(ttl=CACHE_TTL_S)
@@ -72,20 +72,10 @@ def load_glucose(days: int) -> pd.DataFrame:
         SELECT ts, glucose_mg_dl
         FROM `{DATASET}.glucose`
         WHERE user_id = @user_id
-          AND ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days * 24 HOUR)
+          AND ts >= DATETIME_SUB(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 7 HOUR),
+                                  INTERVAL @days * 24 HOUR)
         ORDER BY ts
     """, days)
-
-
-@st.cache_data(ttl=CACHE_TTL_S)
-def load_intraday(hours: int = 48) -> pd.DataFrame:
-    return _query(f"""
-        SELECT ts, heart_rate, stress, body_battery
-        FROM `{DATASET}.garmin_intraday`
-        WHERE user_id = @user_id
-          AND ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days HOUR)
-        ORDER BY ts
-    """, hours)
 
 
 @st.cache_data(ttl=CACHE_TTL_S)
@@ -105,7 +95,7 @@ def load_blood_pressure(days: int) -> pd.DataFrame:
 
 @st.cache_data(ttl=CACHE_TTL_S)
 def load_meals(limit: int = 200) -> pd.DataFrame:
-    """Meals for the picker, most recent first. capture_ts is stored UTC."""
+    """Meals for the picker, most recent first. capture_ts is stored PDT (fixed UTC-7)."""
     return _query_params(f"""
         SELECT meal_id, capture_ts, items, calories, carbs_g, protein_g,
                fat_g, fiber_g, gcs_uri, source
@@ -135,16 +125,6 @@ def load_glucose_window(start_ts, end_ts) -> pd.DataFrame:
     return _query_params(f"""
         SELECT ts, glucose_mg_dl
         FROM `{DATASET}.glucose`
-        WHERE user_id = @user_id AND ts BETWEEN @start_ts AND @end_ts
-        ORDER BY ts
-    """, _window_params(start_ts, end_ts))
-
-
-@st.cache_data(ttl=CACHE_TTL_S)
-def load_intraday_window(start_ts, end_ts) -> pd.DataFrame:
-    return _query_params(f"""
-        SELECT ts, heart_rate, stress, body_battery
-        FROM `{DATASET}.garmin_intraday`
         WHERE user_id = @user_id AND ts BETWEEN @start_ts AND @end_ts
         ORDER BY ts
     """, _window_params(start_ts, end_ts))

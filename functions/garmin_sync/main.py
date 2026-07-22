@@ -81,14 +81,13 @@ def _weight_lbs(bc: dict) -> float | None:
     return round(grams / _GRAMS_PER_LB, 1) if isinstance(grams, (int, float)) else None
 
 
-def _reading_ts(gmt: str | None) -> str | None:
-    """Parse Garmin's overnight-HRV reading time ('2026-07-11T10:41:35.0', GMT)
-    into an ISO UTC timestamp string for BigQuery."""
-    if not gmt:
+def _reading_ts(local: str | None) -> str | None:
+    """Parse Garmin's overnight-HRV reading time ('2026-07-11T10:41:35.0',
+    already local to the device's timezone) into a naive timestamp string."""
+    if not local:
         return None
     try:
-        return (dt.datetime.strptime(gmt[:19], "%Y-%m-%dT%H:%M:%S")
-                .replace(tzinfo=dt.timezone.utc).isoformat())
+        return dt.datetime.strptime(local[:19], "%Y-%m-%dT%H:%M:%S").isoformat()
     except Exception:
         return None
 
@@ -98,7 +97,7 @@ def _hrv_readings(user: str, date: str, hrv: dict) -> list[dict]:
     into per-reading rows for the hrv_readings table."""
     out = []
     for r in (hrv.get("hrvReadings") or []):
-        ts = _reading_ts(r.get("readingTimeGMT"))
+        ts = _reading_ts(r.get("readingTimeLocal"))
         val = r.get("hrvValue")
         if ts and isinstance(val, (int, float)):
             out.append({"user_id": user, "sleep_date": date, "ts": ts, "hrv_value": int(val)})

@@ -26,7 +26,7 @@ hrv AS (
 ),
 combined AS (
   SELECT user_id, ts, glucose_mg_dl,
-    CAST(NULL AS STRUCT<ts TIMESTAMP, val FLOAT64>) AS hrv_point
+    CAST(NULL AS STRUCT<ts DATETIME, val FLOAT64>) AS hrv_point
   FROM glucose
   UNION ALL
   SELECT user_id, hrv_ts AS ts, CAST(NULL AS FLOAT64) AS glucose_mg_dl,
@@ -62,8 +62,8 @@ SELECT
     -- both neighbors exist -> linear interpolation
     WHEN prev_hrv.val IS NOT NULL AND next_hrv.val IS NOT NULL THEN
       prev_hrv.val + (next_hrv.val - prev_hrv.val)
-        * TIMESTAMP_DIFF(ts, prev_hrv.ts, SECOND)
-        / NULLIF(TIMESTAMP_DIFF(next_hrv.ts, prev_hrv.ts, SECOND), 0)
+        * DATETIME_DIFF(ts, prev_hrv.ts, SECOND)
+        / NULLIF(DATETIME_DIFF(next_hrv.ts, prev_hrv.ts, SECOND), 0)
     -- no future point yet (most recent data) -> carry forward
     WHEN prev_hrv.val IS NOT NULL THEN prev_hrv.val
     -- no past point yet (very start of series) -> carry backward

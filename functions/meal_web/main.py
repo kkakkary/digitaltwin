@@ -409,7 +409,7 @@ def save(link_token: str):
         "fat_g": b.get("fat_g"), "fiber_g": b.get("fiber_g"), "calories": b.get("calories"),
         "items": json.dumps(b.get("items")) if b.get("items") is not None else None,
         "gcs_uri": b.get("gcs_uri"), "user_notes": b.get("user_notes"),
-        "created_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "created_ts": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=7)).replace(tzinfo=None).isoformat(),
     }
     errors = _bq.insert_rows_json(SAVED, [row])
     if errors:
@@ -438,12 +438,17 @@ def log_saved(link_token: str):
         return Response(json.dumps({"status": "error", "reason": "not found"}), 404,
                         mimetype="application/json")
     s = rows[0]
+    # Client sends UTC ISO ('Z' or '+00:00'); app-generated timestamp (not a
+    # vendor reading), so normalise to fixed PDT (UTC-7) for BigQuery.
     cap_dt = dt.datetime.fromisoformat(capture_ts.replace("Z", "+00:00"))
+    if cap_dt.tzinfo is None:
+        cap_dt = cap_dt.replace(tzinfo=dt.timezone.utc)
+    cap_dt = (cap_dt - dt.timedelta(hours=7)).replace(tzinfo=None)
     meal = {
         "user_id": user,
         "meal_id": f"{user}-{cap_dt.strftime('%Y%m%dT%H%M%S')}",
         "capture_ts": cap_dt.isoformat(),
-        "upload_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "upload_ts": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=7)).replace(tzinfo=None).isoformat(),
         "gcs_uri": s.get("gcs_uri"),
         "carbs_g": s.get("carbs_g"), "protein_g": s.get("protein_g"),
         "fat_g": s.get("fat_g"), "fiber_g": s.get("fiber_g"), "calories": s.get("calories"),

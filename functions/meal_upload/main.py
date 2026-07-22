@@ -102,8 +102,12 @@ def meal_upload(request):
     if not user_id or not capture_ts or (file is None and not notes):
         return ("need user_id, capture_ts, and at least a photo or a description", 400)
     try:
-        # Normalise to a UTC ISO timestamp BigQuery accepts.
+        # Client sends UTC ISO ('Z' or '+00:00'); app-generated timestamp (not
+        # a vendor reading), so normalise to fixed PDT (UTC-7) for BigQuery.
         capture_dt = dt.datetime.fromisoformat(capture_ts.replace("Z", "+00:00"))
+        if capture_dt.tzinfo is None:
+            capture_dt = capture_dt.replace(tzinfo=dt.timezone.utc)
+        capture_dt = (capture_dt - dt.timedelta(hours=7)).replace(tzinfo=None)
         capture_iso = capture_dt.isoformat()
     except ValueError:
         return (f"capture_ts not valid ISO-8601: {capture_ts!r}", 400)
@@ -147,7 +151,7 @@ def meal_upload(request):
         gcs_uri = f"gs://{BUCKET.replace('gs://', '')}/{blob_name}"
 
     # --- write row to BigQuery (fully timestamped) ---
-    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+    now_iso = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=7)).replace(tzinfo=None).isoformat()
     row = {
         "user_id": user_id,
         "meal_id": f"{user_id}-{capture_dt.strftime('%Y%m%dT%H%M%S')}",

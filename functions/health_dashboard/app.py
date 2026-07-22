@@ -23,16 +23,8 @@ import experiment
 st.set_page_config(page_title="Biostream — Post-Prandial", page_icon="🩸",
                    layout="wide", initial_sidebar_state="collapsed")
 
-TZ = "America/Los_Angeles"
 DEFAULT_POST_MEAL_HOURS = 15
 BASELINE_WINDOW_MIN = 30
-
-
-def _local(ts):
-    """UTC Timestamp/Series -> Pacific time, for display and charting."""
-    if isinstance(ts, pd.Series):
-        return ts.dt.tz_convert(TZ)
-    return ts.tz_convert(TZ)
 
 
 def _meal_items(items_json) -> list[dict]:
@@ -50,7 +42,7 @@ def _meal_label(row) -> str:
     if len(items) > 2:
         foods += f" + {len(items) - 2} more"
     kcal = f"{row['calories']:.0f} kcal" if pd.notna(row["calories"]) else "? kcal"
-    when = _local(row["capture_ts"]).strftime("%b %d, %-I:%M %p")
+    when = row["capture_ts"].strftime("%b %d, %-I:%M %p")
     return f"{when} — {foods or 'meal'} ({kcal})"
 
 
@@ -63,7 +55,7 @@ def _meal_card(row):
         else:
             st.caption("No photo for this meal.")
     with macro_col:
-        st.caption(_local(row["capture_ts"]).strftime("%A, %b %d — %-I:%M %p"))
+        st.caption(row["capture_ts"].strftime("%A, %b %d — %-I:%M %p"))
         items = _meal_items(row["items"])
         if items:
             st.markdown("\n".join(f"- {i.get('food', '?')} ({i.get('grams', '?')} g)"
@@ -80,7 +72,6 @@ def _load_meal_window(meal_ts, hours_after: int):
     end = meal_ts + pd.Timedelta(hours=hours_after)
     return {
         "glucose": data.load_glucose_window(start, end),
-        "intraday": data.load_intraday_window(start, end),
         "activities": data.load_activities_window(start, end),
         "bp": data.load_bp_window(meal_ts, meal_ts + pd.Timedelta(hours=36)),
     }
@@ -136,17 +127,8 @@ if view == "Single Meal":
                                       BASELINE_WINDOW_MIN, hours_after)
     _stat_metrics(stats)
 
-    glucose_pt = window["glucose"].assign(ts=_local(window["glucose"]["ts"]))
-    intraday_pt = (window["intraday"].assign(ts=_local(window["intraday"]["ts"]))
-                  if not window["intraday"].empty else window["intraday"])
-    activities_pt = (window["activities"].assign(start_ts=_local(window["activities"]["start_ts"]),
-                                                 end_ts=_local(window["activities"]["end_ts"]))
-                     if not window["activities"].empty else window["activities"])
-    bp_pt = (window["bp"].assign(measurement_ts_utc=_local(window["bp"]["measurement_ts_utc"]))
-            if not window["bp"].empty else window["bp"])
-
-    fig = charts.meal_timeline_fig(glucose_pt, intraday_pt, activities_pt, bp_pt,
-                                   _local(meal_ts), stats["baseline_mg_dl"])
+    fig = charts.meal_timeline_fig(window["glucose"], window["activities"], window["bp"],
+                                   meal_ts, stats["baseline_mg_dl"])
     st.plotly_chart(fig, use_container_width=True)
 
     if window["activities"].empty:
@@ -209,7 +191,7 @@ else:  # Paired Meal Experiment
 st.divider()
 st.caption(
     "**How it works** — Cloud Scheduler triggers Python Cloud Functions that "
-    "poll Garmin Connect (wellness + intraday + activities), LibreLinkUp CGM, "
+    "poll Garmin Connect (wellness + activities), LibreLinkUp CGM, "
     "and Omron Connect into partitioned BigQuery tables. This page computes "
     "CGM statistics (incremental AUC, peak, time-to-peak, return-to-baseline, "
     "rise velocity/acceleration) live from that data, cached 30 minutes."
