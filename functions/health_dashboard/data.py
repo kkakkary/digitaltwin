@@ -149,3 +149,15 @@ def load_bp_window(start_ts, end_ts) -> pd.DataFrame:
         WHERE user_id = @user_id AND measurement_ts_utc BETWEEN @start_ts AND @end_ts
         ORDER BY measurement_ts_utc
     """, _window_params(start_ts, end_ts))
+
+
+@st.cache_data(ttl=CACHE_TTL_S)
+def load_hrv_for_sleep_date(sleep_date: str) -> pd.DataFrame:
+    """Overnight HRV datapoints for one Garmin sleep_date (the table's
+    partition column, so this is a partition-pruned lookup, not a ts scan)."""
+    return _query_params(f"""
+        SELECT ts, hrv_value
+        FROM `{DATASET}.hrv_readings`
+        WHERE user_id = @user_id AND sleep_date = @sleep_date
+        ORDER BY ts
+    """, [_user_param(), bigquery.ScalarQueryParameter("sleep_date", "DATE", sleep_date)])

@@ -67,9 +67,11 @@ def _meal_card(row):
         m4.metric("Fat (g)", f"{row['fat_g']:.0f}" if pd.notna(row["fat_g"]) else "—")
 
 
-def _load_meal_window(meal_ts, hours_after: int):
-    start = meal_ts - pd.Timedelta(minutes=BASELINE_WINDOW_MIN)
-    end = meal_ts + pd.Timedelta(hours=hours_after)
+def _load_meal_window(meal_ts):
+    """Single Meal view: fixed window around the meal, tight enough to
+    capture the glucose spike (10 min before, 1 hour after)."""
+    start = meal_ts - pd.Timedelta(minutes=10)
+    end = meal_ts + pd.Timedelta(hours=1)
     return {
         "glucose": data.load_glucose_window(start, end),
         "activities": data.load_activities_window(start, end),
@@ -102,19 +104,19 @@ def _activity_section(meal_ts):
         st.caption(f"Distance: {a['distance_m'] / 1609.34:.2f} mi")
 
 
-def _stat_metrics(stats: dict):
-    cols = st.columns(4)
-    cols[0].metric("Baseline", f"{stats['baseline_mg_dl']:.0f} mg/dL"
-                   if stats["baseline_mg_dl"] is not None else "—")
-    cols[1].metric("Peak", f"{stats['peak_mg_dl']:.0f} mg/dL"
-                   if stats["peak_mg_dl"] is not None else "—",
-                   help="Time to peak: "
-                        f"{stats['time_to_peak_min']:.0f} min" if stats["time_to_peak_min"] is not None else None)
-    cols[2].metric("AUC", f"{stats['auc_mg_dl_min']:,.0f}"
-                   if stats["auc_mg_dl_min"] is not None else "—",
-                   help="Incremental area under the curve above baseline (mg/dL·min)")
-    cols[3].metric("Back to baseline", f"{stats['time_to_baseline_min']:.0f} min"
-                   if stats["time_to_baseline_min"] is not None else "never (in window)")
+def _overnight_hrv_section(meal_ts):
+    """HRV (paired with glucose) for the night following the meal — Garmin
+    attributes a night's sleep to the following morning's calendar date."""
+    st.subheader("😴 Overnight HRV")
+    sleep_date = (meal_ts.normalize() + pd.Timedelta(days=1)).date()
+    hrv = data.load_hrv_for_sleep_date(sleep_date.isoformat())
+    if hrv.empty:
+        st.caption(f"No HRV data recorded for the night of {sleep_date.strftime('%b %d')}.")
+        return
+
+    glucose = data.load_glucose_window(hrv["ts"].min(), hrv["ts"].max())
+    fig = charts.overnight_hrv_glucose_fig(hrv, glucose)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 st.title("Kevin — Post-Prandial Experiment")
@@ -140,21 +142,17 @@ if view == "Single Meal":
 
     _meal_card(meal)
     _activity_section(meal_ts)
+    _overnight_hrv_section(meal_ts)
     st.divider()
 
-    hours_after = st.slider("Hours to track after the meal", 4, 20, DEFAULT_POST_MEAL_HOURS)
-    window = _load_meal_window(meal_ts, hours_after)
+    window = _load_meal_window(meal_ts)
 
     if window["glucose"].empty:
         st.warning("No CGM readings in this window — nothing to analyze for this meal.")
         st.stop()
 
-    stats = experiment.cgm_meal_stats(window["glucose"], meal_ts,
-                                      BASELINE_WINDOW_MIN, hours_after)
-    _stat_metrics(stats)
-
     fig = charts.meal_timeline_fig(window["glucose"], window["activities"], window["bp"],
-                                   meal_ts, stats["baseline_mg_dl"])
+                                   meal_ts, baseline=None)
     st.plotly_chart(fig, use_container_width=True)
 
     if window["activities"].empty:

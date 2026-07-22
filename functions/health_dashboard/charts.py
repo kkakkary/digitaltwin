@@ -220,6 +220,33 @@ def paired_cgm_overlay_fig(window_a: pd.DataFrame, window_b: pd.DataFrame,
     return fig
 
 
+def overnight_hrv_glucose_fig(hrv: pd.DataFrame, glucose: pd.DataFrame) -> go.Figure:
+    """HRV during the night's sleep (violet, left axis) paired with glucose
+    (blue, right axis) over the same overnight window."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=hrv["ts"], y=hrv["hrv_value"], mode="lines+markers", name="HRV",
+        line=dict(color=VIOLET, width=2), marker=dict(size=5, color=VIOLET),
+        hovertemplate="%{y:.0f} ms<extra>HRV</extra>",
+    ))
+    g = break_time_gaps(glucose, "ts", pd.Timedelta(minutes=30))
+    fig.add_trace(go.Scatter(
+        x=g["ts"], y=g["glucose_mg_dl"], mode="lines", name="Glucose",
+        line=dict(color=BLUE, width=2), yaxis="y2",
+        hovertemplate="%{y:.0f} mg/dL<extra>Glucose</extra>",
+    ))
+    fig = _layout(fig, height=380)
+    fig.update_layout(
+        showlegend=True,
+        yaxis=dict(title=dict(text="HRV (ms)", font=dict(color=VIOLET)),
+                  gridcolor=GRID, tickfont=dict(color=MUTED)),
+        yaxis2=dict(title=dict(text="Glucose (mg/dL)", font=dict(color=BLUE)),
+                   overlaying="y", side="right", showgrid=False,
+                   tickfont=dict(color=MUTED)),
+    )
+    return fig
+
+
 def bp_fig(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     for name, col, color in [("Systolic", "systolic", BLUE),
