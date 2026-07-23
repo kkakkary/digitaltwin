@@ -17,6 +17,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import sys
 
 import functions_framework
 import httpx
@@ -210,10 +211,13 @@ def omron_sync(request):
                 _upsert(user, rows)
             out[user] = len(rows)
         except Exception as exc:  # one user's failure must not abort the rest
-            out[user] = f"error: {type(exc).__name__}: {exc}"
+            msg = f"error: {type(exc).__name__}: {exc}"
+            print(f"[omron-sync] {user}: {msg}", file=sys.stderr)
+            out[user] = msg
 
+    status = "ok" if not any(isinstance(v, str) for v in out.values()) else "partial"
     return (
-        json.dumps({"status": "ok", "since": since_date.isoformat(), "rows_per_user": out}),
+        json.dumps({"status": status, "since": since_date.isoformat(), "rows_per_user": out}),
         200,
         {"Content-Type": "application/json"},
     )

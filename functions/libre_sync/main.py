@@ -19,6 +19,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import sys
 from collections import defaultdict
 
 import functions_framework
@@ -228,7 +229,9 @@ def libre_sync(request):
                             rows_by_user[user_id].append(row)
 
                 except Exception as exc:
-                    out[user_id] = f"error fetching graph: {type(exc).__name__}: {exc}"
+                    msg = f"error fetching graph: {type(exc).__name__}: {exc}"
+                    print(f"[libre-sync] {user_id}: {msg}", file=sys.stderr)
+                    out[user_id] = msg
 
             for user_id, rows in rows_by_user.items():
                 try:
@@ -236,10 +239,14 @@ def libre_sync(request):
                         _upsert(user_id, rows)
                     out[user_id] = len(rows)
                 except Exception as exc:
-                    out[user_id] = f"error upserting: {type(exc).__name__}: {exc}"
+                    msg = f"error upserting: {type(exc).__name__}: {exc}"
+                    print(f"[libre-sync] {user_id}: {msg}", file=sys.stderr)
+                    out[user_id] = msg
 
     except Exception as exc:
-        out["_auth"] = f"error: {type(exc).__name__}: {exc}"
+        msg = f"error: {type(exc).__name__}: {exc}"
+        print(f"[libre-sync] auth: {msg}", file=sys.stderr)
+        out["_auth"] = msg
 
     status = "ok" if not any(
         isinstance(v, str) and v.startswith("error") for v in out.values()

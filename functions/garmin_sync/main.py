@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import sys
 
 import functions_framework
 from garminconnect import Garmin
@@ -216,6 +217,9 @@ def garmin_sync(request):
                 _upsert_readings(user, sorted({r["sleep_date"] for r in readings}), readings)
             out[user] = {"days": len(rows), "hrv_readings": len(readings)}
         except Exception as exc:  # one user's failure must not abort the rest
-            out[user] = f"error: {type(exc).__name__}: {exc}"
-    return (json.dumps({"status": "ok", "dates": dates, "per_user": out}),
+            msg = f"error: {type(exc).__name__}: {exc}"
+            print(f"[garmin-sync] {user}: {msg}", file=sys.stderr)
+            out[user] = msg
+    status = "ok" if not any(isinstance(v, str) for v in out.values()) else "partial"
+    return (json.dumps({"status": status, "dates": dates, "per_user": out}),
             200, {"Content-Type": "application/json"})
