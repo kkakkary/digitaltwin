@@ -80,13 +80,12 @@ def _load_meal_window(meal_ts):
 
 
 def _activity_section(meal_ts):
-    """Show the Garmin activity (if any) that started 30-60 min after the
-    meal — e.g. a post-meal walk — with its own metrics row."""
+    """Show the Garmin activity (if any) that started within 2 hours after
+    the meal — e.g. a post-meal walk — with its own metrics row."""
     st.subheader("🏃 Post-Meal Activity")
-    paired = data.load_activities_window(meal_ts + pd.Timedelta(minutes=30),
-                                         meal_ts + pd.Timedelta(hours=1))
+    paired = data.load_activities_window(meal_ts, meal_ts + pd.Timedelta(hours=2))
     if paired.empty:
-        st.caption("No activity logged 30–60 min after this meal.")
+        st.caption("No activity logged in the 2 hours after this meal.")
         return
 
     a = paired.iloc[0]
