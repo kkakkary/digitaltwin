@@ -68,10 +68,11 @@ def _meal_card(row):
 
 
 def _load_meal_window(meal_ts):
-    """Single Meal view: fixed window around the meal, tight enough to
-    capture the glucose spike (10 min before, 1 hour after)."""
+    """Single Meal view: fixed window around the meal (10 min before,
+    4 hours after) -- tight enough to anchor on the spike, wide enough to
+    see the full return toward baseline."""
     start = meal_ts - pd.Timedelta(minutes=10)
-    end = meal_ts + pd.Timedelta(hours=1)
+    end = meal_ts + pd.Timedelta(hours=4)
     return {
         "glucose": data.load_glucose_window(start, end),
         "activities": data.load_activities_window(start, end),
@@ -141,7 +142,6 @@ if view == "Single Meal":
 
     _meal_card(meal)
     _activity_section(meal_ts)
-    _overnight_hrv_section(meal_ts)
     st.divider()
 
     window = _load_meal_window(meal_ts)
@@ -154,10 +154,11 @@ if view == "Single Meal":
                                    meal_ts, baseline=None)
     st.plotly_chart(fig, use_container_width=True)
 
-    if window["activities"].empty:
-        st.caption("No logged exercise in this window.")
     if window["bp"].empty:
         st.caption("No blood-pressure reading in the following ~36 hours.")
+
+    st.divider()
+    _overnight_hrv_section(meal_ts)
 
 else:  # Paired Meal Experiment
     st.caption(
