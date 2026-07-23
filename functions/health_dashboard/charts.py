@@ -8,7 +8,6 @@ body battery / recovery=green. Sleep depth is an ordinal green ramp.
 
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 from transforms import GLUCOSE_RANGE_MG_DL, break_time_gaps, fill_date_gaps
 
@@ -123,79 +122,43 @@ def steps_fig(daily: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def intraday_fig(df: pd.DataFrame) -> go.Figure:
-    """Three metrics on different scales → three stacked panels, one shared
-    time axis. Never a dual-axis chart."""
-    panels = [
-        ("Heart rate", "heart_rate", RED, "bpm"),
-        ("Stress", "stress", YELLOW, ""),
-        ("Body battery", "body_battery", GREEN, ""),
-    ]
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.10,
-                        subplot_titles=[p[0] for p in panels])
-    for i, (_, col, color, unit) in enumerate(panels, start=1):
-        sub = break_time_gaps(df.dropna(subset=[col]), "ts",
-                              pd.Timedelta(hours=1))
-        suffix = f" {unit}".rstrip()
-        fig.add_trace(go.Scatter(
-            x=sub["ts"], y=sub[col], mode="lines",
-            line=dict(color=color, width=2),
-            hovertemplate="%{y:.0f}" + suffix + "<extra></extra>",
-        ), row=i, col=1)
-    fig = _layout(fig, height=520, top=28)
-    fig.update_annotations(font=dict(color=INK_2, size=13), x=0, xanchor="left")
-    return fig
-
-
 EXERCISE_BAND = "rgba(235, 104, 52, 0.12)"  # translucent orange wash
 
 
-def meal_timeline_fig(glucose: pd.DataFrame, intraday: pd.DataFrame,
-                      activities: pd.DataFrame, bp: pd.DataFrame,
-                      meal_ts, baseline: float | None) -> go.Figure:
-    """Single Meal view: CGM + heart rate, one shared time axis, meal start +
-    exercise windows + next-morning BP drawn as overlays."""
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.10,
-                        row_heights=[0.55, 0.45],
-                        subplot_titles=["Glucose (CGM)", "Heart rate"])
+def meal_timeline_fig(glucose: pd.DataFrame, activities: pd.DataFrame,
+                      bp: pd.DataFrame, meal_ts, baseline: float | None) -> go.Figure:
+    """Single Meal view: CGM anchored on the meal, with exercise windows and
+    next-morning BP drawn as overlays."""
+    fig = go.Figure()
 
     lo, hi = GLUCOSE_RANGE_MG_DL
-    fig.add_hrect(y0=lo, y1=hi, fillcolor=BAND, line_width=0, layer="below", row=1, col=1)
+    fig.add_hrect(y0=lo, y1=hi, fillcolor=BAND, line_width=0, layer="below")
     if baseline is not None:
-        fig.add_hline(y=baseline, line=dict(color=MUTED, width=1, dash="dot"), row=1, col=1)
+        fig.add_hline(y=baseline, line=dict(color=MUTED, width=1, dash="dot"))
     g = break_time_gaps(glucose, "ts", pd.Timedelta(minutes=30))
     fig.add_trace(go.Scatter(x=g["ts"], y=g["glucose_mg_dl"], mode="lines",
                              line=dict(color=BLUE, width=2),
-                             hovertemplate="%{y:.0f} mg/dL<extra></extra>"), row=1, col=1)
-
-    hr = break_time_gaps(intraday.dropna(subset=["heart_rate"]), "ts", pd.Timedelta(hours=1))
-    fig.add_trace(go.Scatter(x=hr["ts"], y=hr["heart_rate"], mode="lines",
-                             line=dict(color=RED, width=2),
-                             hovertemplate="%{y:.0f} bpm<extra></extra>"), row=2, col=1)
+                             hovertemplate="%{y:.0f} mg/dL<extra></extra>"))
 
     fig.add_vline(x=meal_ts, line=dict(color=INK_2, width=2, dash="dash"),
                  annotation_text="Meal", annotation_position="top",
-                 annotation_font=dict(color=INK_2, size=11), row="all", col="all")
+                 annotation_font=dict(color=INK_2, size=11))
 
     for _, a in activities.iterrows():
         end = a["end_ts"] if pd.notna(a["end_ts"]) else a["start_ts"]
         fig.add_vrect(x0=a["start_ts"], x1=end, fillcolor=EXERCISE_BAND, line_width=0,
                      annotation_text=a["activity_type"] or "Exercise",
                      annotation_position="top left",
-                     annotation_font=dict(color=ORANGE, size=10), row="all", col="all")
+                     annotation_font=dict(color=ORANGE, size=10))
 
     for _, r in bp.iterrows():
         fig.add_vline(x=r["measurement_ts_utc"], line=dict(color=GREEN, width=1, dash="dot"),
                      annotation_text=f"BP {r['systolic']:.0f}/{r['diastolic']:.0f}",
                      annotation_position="bottom right",
-                     annotation_font=dict(color=GREEN, size=10), row=1, col=1)
+                     annotation_font=dict(color=GREEN, size=10))
 
-    fig = _layout(fig, height=520, top=28)
-    fig.update_yaxes(title_text="mg/dL", title_font=dict(color=MUTED), row=1, col=1)
-    fig.update_yaxes(title_text="bpm", title_font=dict(color=MUTED), row=2, col=1)
-    fig.update_annotations(font=dict(color=INK_2, size=13))
+    fig = _layout(fig, height=420)
+    fig.update_yaxes(title_text="mg/dL", title_font=dict(color=MUTED))
     return fig
 
 

@@ -45,7 +45,6 @@ def test_meal_timeline_fig_marks_exercise_and_bp():
     meal_ts = pd.Timestamp("2026-07-18 19:00", tz="UTC")
     times = pd.date_range(meal_ts - pd.Timedelta(hours=1), meal_ts + pd.Timedelta(hours=3), freq="15min")
     glucose = pd.DataFrame({"ts": times, "glucose_mg_dl": [100.0] * len(times)})
-    intraday = pd.DataFrame({"ts": times, "heart_rate": [70.0] * len(times)})
     activities = pd.DataFrame({
         "activity_id": [1], "activity_type": ["walking"], "activity_name": ["walk"],
         "start_ts": [meal_ts + pd.Timedelta(hours=1)],
@@ -54,10 +53,10 @@ def test_meal_timeline_fig_marks_exercise_and_bp():
     bp = pd.DataFrame({"measurement_ts_utc": [meal_ts + pd.Timedelta(hours=14)],
                        "systolic": [120], "diastolic": [78]})
 
-    fig = charts.meal_timeline_fig(glucose, intraday, activities, bp, meal_ts, baseline=95.0)
+    fig = charts.meal_timeline_fig(glucose, activities, bp, meal_ts, baseline=95.0)
 
-    # 2 line traces (CGM, HR) + exercise shading is a shape, not a trace.
-    assert len(fig.data) == 2
+    # 1 line trace (CGM) + exercise shading is a shape, not a trace.
+    assert len(fig.data) == 1
     assert any(s.fillcolor == charts.EXERCISE_BAND for s in fig.layout.shapes)
 
 
